@@ -3,6 +3,19 @@
 #include <list>
 #include <cstdint>
 #include <random>
+#include <fstream>
+
+#ifdef _WIN32
+#include <direct.h>
+#include <io.h>
+#define MKDIR(path) _mkdir(path)
+#define ACCESS(path, mode) _access(path, mode)
+#else
+#include <sys/stat.h>
+#include <unistd.h>
+#define MKDIR(path) mkdir(path, 0755)
+#define ACCESS(path, mode) access(path, mode)
+#endif
 
 class Vec3
 {
@@ -26,15 +39,13 @@ public:
 class Triangle
 {
 public:
-  Vec3 a, b, c;
+  Vec3 a, b, c, color;
   unsigned char *_data;
 
-  Triangle(Vec3 a, Vec3 b, Vec3 c) : a(a), b(b), c(c) {};
+  Triangle(Vec3 a, Vec3 b, Vec3 c) : a(a), b(b), c(c), color(Vec3(255, 0, 0)) {};
+  Triangle(Vec3 a, Vec3 b, Vec3 c, Vec3 color) : a(a), b(b), c(c), color(color) {};
 
-  ~Triangle()
-  {
-    delete[] _data; // Ensure we free the allocated memory
-  }
+  ~Triangle() {} // Manged by the Scene;
 
   unsigned char *getData() const
   {
@@ -80,19 +91,36 @@ public:
     rotatePointAroundCenter(c);
   }
 
-  unsigned char *createTriangleData(Vec3 a, Vec3 b, Vec3 c, int width, int height, unsigned char *data = nullptr)
+  void scale(float scalar)
   {
-    if (data == nullptr)
+    // Scale from the center of the triangle
+    Vec3 center((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3, (a.z + b.z + c.z) / 3);
+    auto scalePointFromCenter = [center, scalar](Vec3 &point)
     {
-      data = new unsigned char[width * height * 3];
-    }
+      point.x = center.x + (point.x - center.x) * scalar;
+      point.y = center.y + (point.y - center.y) * scalar;
+      point.z = center.z + (point.z - center.z) * scalar;
+    };
+    scalePointFromCenter(a);
+    scalePointFromCenter(b);
+    scalePointFromCenter(c);
+  }
 
-    // Random color for the triangle
-    int range = 255 - 1 + 1;
-    int num1 = rand() % range + 1;
-    int num2 = rand() % range + 1;
-    int num3 = rand() % range + 1;
+  void move(Vec3 offset)
+  {
+    a.x += offset.x;
+    a.y += offset.y;
+    a.z += offset.z;
+    b.x += offset.x;
+    b.y += offset.y;
+    b.z += offset.z;
+    c.x += offset.x;
+    c.y += offset.y;
+    c.z += offset.z;
+  }
 
+  void renderToBuffer(unsigned char *data, int width, int height)
+  {
     // Triangle rasterization logic
     for (int j = 0; j < height; ++j)
     {
@@ -101,9 +129,8 @@ public:
         Vec3 p(i + 0.5f, j + 0.5f);
 
         // Barycentric coordinates
-        // Reference: https://en.wikipedia.org/wiki/Barycentric_coordinate_system#Triangle
-        Vec3 v0 = b - a;
-        Vec3 v1 = c - a;
+        Vec3 v0 = this->b - this->a;
+        Vec3 v1 = this->c - this->a;
         Vec3 v2 = p - a;
 
         // Compute barycentric coordinates
@@ -113,32 +140,30 @@ public:
         float d20 = v2.dot(v0);
         float d21 = v2.dot(v1);
 
-        float denom = d00 * d11 - d01 * d01; // Normalized area of the triangle
+        float denom = d00 * d11 - d01 * d01;
 
         if (denom == 0.0f)
-          continue; // avoid division by zero
+          continue;
 
         float v = (d11 * d20 - d01 * d21) / denom;
         float w = (d00 * d21 - d01 * d20) / denom;
         float u = 1.0f - v - w;
 
-        int index = (j * width + i) * 3;
-
         if ((u >= 0) && (v >= 0) && (w >= 0))
         {
-          data[index + 0] = num1; // Red
-          data[index + 1] = num2; // Green
-          data[index + 2] = num2; // Blue
+          int index = (j * width + i) * 3;
+          data[index + 0] = this->color.x; // Red
+          data[index + 1] = this->color.y; // Green
+          data[index + 2] = this->color.z; // Blue
         }
       }
     }
-    _data = data;
-    return data;
   }
 };
 
 class Scene
 {
+
 public:
   // List of objects (triangles) in the scene
   std::list<Triangle> triangles;
@@ -158,33 +183,22 @@ public:
     triangles.clear();
   };
 
-  unsigned char *getDate(float width, float height)
+  unsigned char *getData(int width, int height)
   {
-    unsigned char *data = nullptr;
+    unsigned char *data = new unsigned char[width * height * 3];
 
+    // Clear to black background
+    memset(data, 0, width * height * 3);
+
+    int triIndex = 0;
     for (auto &t : triangles)
     {
-      data = t.createTriangleData(t.a, t.b, t.c, width, height, data);
+      t.renderToBuffer(data, width, height);
+      triIndex++;
     }
 
     return data;
   }
-};
-
-class Renderer
-{
-public:
-  void init() {
-
-  };
-
-  void update() {
-
-  };
-
-  void render() {
-
-  };
 };
 
 class Image
@@ -243,6 +257,65 @@ public:
         fwrite(&r, sizeof(unsigned char), 1, file); // Red
       }
     }
+
+    fclose(file);
+    //std::cout << "BMP file created: " << filename << std::endl;
+  };
+
+  // Simple GIF-like format (actually creates individual BMP frames)
+  static void createAnimatedFrames(const char *folderName, Scene &scene, int width, int height, int numFrames)
+  {
+    // Create the folder - simple approach
+    int result = MKDIR(folderName);
+
+    // Check if folder creation was successful or if it already exists
+    if (result != 0 && ACCESS(folderName, 0) != 0)
+    {
+      std::cerr << "Failed to create or access folder: " << folderName << std::endl;
+      std::cerr << "Creating frames in current directory instead..." << std::endl;
+    }
+    else
+    {
+      std::cout << "Using folder: " << folderName << std::endl;
+    }
+
+    std::cout << "Creating " << numFrames << " animation frames..." << std::endl;
+
+    for (int frame = 0; frame < numFrames; ++frame)
+    {
+      // Rotate triangles for animation
+      for (auto &t : scene.triangles)
+        t.rotateC(0.05f); // Smaller rotation for smoother animation
+
+      auto data = scene.getData(width, height);
+
+      // Create filename for this frame inside the folder
+      char filename[512];
+      sprintf(filename, "%s/frame_%03d.bmp", folderName, frame);
+
+      createBMP(filename, width, height, data);
+
+      delete[] data;
+
+      if ((frame + 1) % 10 == 0 || frame == 0)
+      {
+        std::cout << "Created frame " << frame + 1 << "/" << numFrames << std::endl;
+      }
+    }
+
+    // Convert frames to GIF using ffmpeg with c++
+    
+    auto cmd = "ffmpeg -y -loglevel quiet -framerate 25 -i " + std::string(folderName) + "/frame_%03d.bmp " + std::string(folderName) + "/animation.gif";
+    system(cmd.c_str());
+
+    // Delete individual frames
+    for (int frame = 0; frame < numFrames; ++frame)
+    {
+      char filename[512];
+      sprintf(filename, "%s/frame_%03d.bmp", folderName, frame);
+      remove(filename);
+    }
+    
   };
 
 private:
@@ -261,16 +334,23 @@ Triangle generateRandomTriangle(int width, int height)
 {
   std::random_device rd;
   std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> disX(0.1f, static_cast<float>(width));
-  std::uniform_real_distribution<float> disY(0.1f, static_cast<float>(height));
+  std::uniform_real_distribution<float> disX(50.0f, static_cast<float>(width - 50));
+  std::uniform_real_distribution<float> disY(50.0f, static_cast<float>(height - 50));
 
   Vec3 a(disX(gen), disY(gen));
   Vec3 b(disX(gen), disY(gen));
   Vec3 c(disX(gen), disY(gen));
 
-  // Randome rotation angle
-  Triangle t(a, b, c);
-  t.rotateC(static_cast<float>(rand() % 360) * (3.14159f / 180.0f)); // Convert degrees to radians
+  // ranom color
+  Vec3 color(
+      static_cast<float>(rand() % 256),
+      static_cast<float>(rand() % 256),
+      static_cast<float>(rand() % 256)
+    );
+
+  Triangle t(a, b, c, color);
+  std::uniform_real_distribution<float> angleDis(0.0f, 2.0f * 3.14159f);
+  t.rotateC(angleDis(gen));
 
   return t;
 }
@@ -282,13 +362,24 @@ int main()
   int width = 800;
   int height = 600;
 
+  Triangle center = Triangle(Vec3(width / 2 - 200, height / 2 - 200), Vec3(width / 2 + 200, height / 2 - 200), Vec3(width / 2, height / 2 + 100));
+
   for (int i = 0; i < 10; ++i)
   {
     Triangle t = generateRandomTriangle(width, height);
     scene.addTriangle(t);
   }
 
-  Image::createBMP("triangle.bmp", width, height, scene.getDate(width, height));
+  center.rotateC(3.14159f); // Rotate 180 degrees in radians
 
+  scene.addTriangle(center);
+
+  unsigned char *data = scene.getData(width, height);
+  Image::createBMP("triangle.bmp", width, height, data);
+  delete[] data;
+
+  Image::createAnimatedFrames("triangle_anim", scene, width, height, 250);
+
+  std::cout << "Files created successfully!" << std::endl;
   return 0;
 }
