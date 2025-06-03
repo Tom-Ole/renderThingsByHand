@@ -262,7 +262,6 @@ public:
     //std::cout << "BMP file created: " << filename << std::endl;
   };
 
-  // Simple GIF-like format (actually creates individual BMP frames)
   static void createAnimatedFrames(const char *folderName, Scene &scene, int width, int height, int numFrames)
   {
     // Create the folder - simple approach
