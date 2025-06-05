@@ -4,6 +4,9 @@
 #include <cstdint>
 #include <random>
 #include <fstream>
+#include <cmath>
+#include <vector>
+#include <algorithm>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -22,10 +25,9 @@ class Vec3
 public:
   float x, y, z;
 
-  Vec3(float x, float y) : x(x), y(y), z(0) {};
-  Vec3(float x, float y, float z) : x(x), y(y), z(z) {};
+  Vec3(float x = 0, float y = 0, float z = 0) : x(x), y(y), z(z) {};
 
-  float dot(Vec3 b) const
+  float dot(const Vec3 &b) const
   {
     return x * b.x + y * b.y + z * b.z;
   };
@@ -34,22 +36,100 @@ public:
   {
     return Vec3(x - b.x, y - b.y, z - b.z);
   };
+
+  Vec3 operator+(const Vec3 &b) const
+  {
+    return Vec3(x + b.x, y + b.y, z + b.z);
+  };
+
+  Vec3 operator*(float scalar) const
+  {
+    return Vec3(x * scalar, y * scalar, z * scalar);
+  };
+
+  Vec3 cross(const Vec3 &b) const
+  {
+    return Vec3(y * b.z - z * b.y, z * b.x - x * b.z, x * b.y - y * b.x);
+  };
+
+  float length() const
+  {
+    return sqrt(x * x + y * y + z * z);
+  };
+
+  Vec3 normalize() const
+  {
+    float len = length();
+    if (len == 0)
+      return Vec3(0, 0, 0);
+    return Vec3(x / len, y / len, z / len);
+  };
+};
+
+// 3D Camera class for perspective projection
+class Camera
+{
+public:
+    Vec3 position;
+    Vec3 target;
+    Vec3 up;
+    float fov;    // Field of view in radians
+    float near_z; // Near clipping plane
+    float far_z;  // Far clipping plane
+
+    Camera(Vec3 pos, Vec3 tgt, Vec3 u, float field_of_view = 3.14159f / 3.0f)
+        : position(pos), target(tgt), up(u), fov(field_of_view), near_z(0.1f), far_z(1000.0f) {}
+
+    Vec3 project(const Vec3 &point, int screenWidth, int screenHeight) const
+    {
+        // Camera basis vectors
+        Vec3 forward = (target - position).normalize();
+        Vec3 right = forward.cross(up).normalize();
+        Vec3 camera_up = right.cross(forward);
+
+        Vec3 translated = point - position;
+        float x = translated.dot(right);
+        float y = translated.dot(camera_up);
+        float z = translated.dot(forward);
+
+        // Reject points behind camera
+        if (z <= near_z) z = near_z + 0.001f;
+
+        float aspect = float(screenWidth) / screenHeight;
+        float scale = 1.0f / tanf(fov * 0.5f);
+
+        float proj_x = (x * scale) / (z * aspect);
+        float proj_y = (y * scale) / z;
+
+        // Convert to screen pixels (origin top-left)
+        float screen_x = (proj_x + 1.0f) * 0.5f * screenWidth;
+        float screen_y = (1.0f - proj_y) * 0.5f * screenHeight;
+
+        return Vec3(screen_x, screen_y, z);
+    }
 };
 
 class Triangle
 {
 public:
   Vec3 a, b, c, color;
-  unsigned char *_data;
+  Vec3 normal;
 
-  Triangle(Vec3 a, Vec3 b, Vec3 c) : a(a), b(b), c(c), color(Vec3(255, 0, 0)) {};
-  Triangle(Vec3 a, Vec3 b, Vec3 c, Vec3 color) : a(a), b(b), c(c), color(color) {};
-
-  ~Triangle() {} // Manged by the Scene;
-
-  unsigned char *getData() const
+  Triangle(Vec3 a, Vec3 b, Vec3 c) : a(a), b(b), c(c), color(Vec3(255, 0, 0))
   {
-    return _data;
+    calculateNormal();
+  };
+
+  Triangle(Vec3 a, Vec3 b, Vec3 c, Vec3 color) : a(a), b(b), c(c), color(color)
+  {
+    calculateNormal();
+  };
+
+  void calculateNormal()
+  {
+    Vec3 v1 = b - a;
+    Vec3 v2 = c - a;
+    normal = v1.cross(v2).normalize();
   }
 
   void rotate(float angle)
@@ -69,12 +149,13 @@ public:
     rotatePoint(a);
     rotatePoint(b);
     rotatePoint(c);
+    calculateNormal();
   }
 
   void rotateC(float angle)
   {
     // Rotate around the center of the triangle
-    Vec3 center((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3);
+    Vec3 center((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3, (a.z + b.z + c.z) / 3);
 
     auto rotatePointAroundCenter = [center, angle](Vec3 &point)
     {
@@ -89,6 +170,28 @@ public:
     rotatePointAroundCenter(a);
     rotatePointAroundCenter(b);
     rotatePointAroundCenter(c);
+    calculateNormal();
+  }
+
+  void rotateY(float angle)
+  {
+    // Rotate around Y axis
+    Vec3 center((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3, (a.z + b.z + c.z) / 3);
+
+    auto rotatePointY = [center, angle](Vec3 &point)
+    {
+      float cosAngle = cos(angle);
+      float sinAngle = sin(angle);
+      float translatedX = point.x - center.x;
+      float translatedZ = point.z - center.z;
+      point.x = translatedX * cosAngle - translatedZ * sinAngle + center.x;
+      point.z = translatedX * sinAngle + translatedZ * cosAngle + center.z;
+    };
+
+    rotatePointY(a);
+    rotatePointY(b);
+    rotatePointY(c);
+    calculateNormal();
   }
 
   void scale(float scalar)
@@ -108,32 +211,52 @@ public:
 
   void move(Vec3 offset)
   {
-    a.x += offset.x;
-    a.y += offset.y;
-    a.z += offset.z;
-    b.x += offset.x;
-    b.y += offset.y;
-    b.z += offset.z;
-    c.x += offset.x;
-    c.y += offset.y;
-    c.z += offset.z;
+    a = a + offset;
+    b = b + offset;
+    c = c + offset;
   }
 
-  void renderToBuffer(unsigned char *data, int width, int height)
+  // Check if triangle is facing towards camera (for backface culling)
+  bool isFacingCamera(const Vec3 &cameraPos) const
   {
-    // Triangle rasterization logic
-    for (int j = 0; j < height; ++j)
+    Vec3 center((a.x + b.x + c.x) / 3, (a.y + b.y + c.y) / 3, (a.z + b.z + c.z) / 3);
+    Vec3 toCamera = (cameraPos - center).normalize();
+    return normal.dot(toCamera) > 0;
+  }
+
+  void renderToBuffer(unsigned char *data, float *zbuffer, int width, int height, const Camera &camera)
+  {
+    // Project 3D vertices to 2D screen space
+    Vec3 p1 = camera.project(a, width, height);
+    Vec3 p2 = camera.project(b, width, height);
+    Vec3 p3 = camera.project(c, width, height);
+
+    // Skip triangles behind the camera
+    if (p1.z <= camera.near_z || p2.z <= camera.near_z || p3.z <= camera.near_z)
+      return;
+
+    // Backface culling
+    if (!isFacingCamera(camera.position))
+      return;
+
+    // Find bounding box
+    int minX = std::max(0, (int)std::min({p1.x, p2.x, p3.x}));
+    int maxX = std::min(width - 1, (int)std::max({p1.x, p2.x, p3.x}));
+    int minY = std::max(0, (int)std::min({p1.y, p2.y, p3.y}));
+    int maxY = std::min(height - 1, (int)std::max({p1.y, p2.y, p3.y}));
+
+    // Triangle rasterization with depth testing
+    for (int j = minY; j <= maxY; ++j)
     {
-      for (int i = 0; i < width; ++i)
+      for (int i = minX; i <= maxX; ++i)
       {
-        Vec3 p(i + 0.5f, j + 0.5f);
+        Vec3 p(i + 0.5f, j + 0.5f, 0);
 
         // Barycentric coordinates
-        Vec3 v0 = this->b - this->a;
-        Vec3 v1 = this->c - this->a;
-        Vec3 v2 = p - a;
+        Vec3 v0 = Vec3(p2.x - p1.x, p2.y - p1.y, 0);
+        Vec3 v1 = Vec3(p3.x - p1.x, p3.y - p1.y, 0);
+        Vec3 v2 = Vec3(p.x - p1.x, p.y - p1.y, 0);
 
-        // Compute barycentric coordinates
         float d00 = v0.dot(v0);
         float d01 = v0.dot(v1);
         float d11 = v1.dot(v1);
@@ -141,7 +264,6 @@ public:
         float d21 = v2.dot(v1);
 
         float denom = d00 * d11 - d01 * d01;
-
         if (denom == 0.0f)
           continue;
 
@@ -149,12 +271,27 @@ public:
         float w = (d00 * d21 - d01 * d20) / denom;
         float u = 1.0f - v - w;
 
-        if ((u >= 0) && (v >= 0) && (w >= 0))
+        if (u >= 0 && v >= 0 && w >= 0)
         {
-          int index = (j * width + i) * 3;
-          data[index + 0] = this->color.x; // Red
-          data[index + 1] = this->color.y; // Green
-          data[index + 2] = this->color.z; // Blue
+          // Interpolate depth
+          float depth = u * p1.z + v * p2.z + w * p3.z;
+
+          int index = j * width + i;
+
+          // Depth test
+          if (depth < zbuffer[index])
+          {
+            zbuffer[index] = depth;
+
+            // Apply simple lighting based on normal
+            Vec3 lightDir = Vec3(0, 0, -1).normalize();             // Light coming from camera
+            float lighting = std::max(0.3f, -normal.dot(lightDir)); // Ambient + diffuse
+
+            int pixelIndex = index * 3;
+            data[pixelIndex + 0] = (unsigned char)(color.x * lighting); // Red
+            data[pixelIndex + 1] = (unsigned char)(color.y * lighting); // Green
+            data[pixelIndex + 2] = (unsigned char)(color.z * lighting); // Blue
+          }
         }
       }
     }
@@ -163,41 +300,50 @@ public:
 
 class Scene
 {
-
 public:
-  // List of objects (triangles) in the scene
   std::list<Triangle> triangles;
+  Camera camera;
+
+  Scene() : camera(Vec3(0, 0, 5), Vec3(0, 0, 0), Vec3(0, 1, 0)) {}
 
   void addTriangle(const Triangle &triangle)
   {
     triangles.push_back(triangle);
-  };
+  }
 
-  std::list<Triangle> getTriangles() const
+  // Return const reference to avoid copying the list
+  const std::list<Triangle> &getTriangles() const
   {
     return triangles;
-  };
+  }
 
   void clear()
   {
     triangles.clear();
-  };
+  }
 
+  void setCamera(const Camera &cam)
+  {
+    camera = cam;
+  }
+
+  // Render scene to raw RGB buffer
   unsigned char *getData(int width, int height)
   {
     unsigned char *data = new unsigned char[width * height * 3];
+    float *zbuffer = new float[width * height];
 
-    // Clear to black background
+    // Clear framebuffer to black and zbuffer to max depth
     memset(data, 0, width * height * 3);
+    std::fill(zbuffer, zbuffer + width * height, std::numeric_limits<float>::max());
 
-    int triIndex = 0;
     for (auto &t : triangles)
     {
-      t.renderToBuffer(data, width, height);
-      triIndex++;
+      t.renderToBuffer(data, zbuffer, width, height, camera);
     }
 
-    return data;
+    delete[] zbuffer;
+    return data; // caller must delete[] this memory
   }
 };
 
@@ -259,15 +405,12 @@ public:
     }
 
     fclose(file);
-    //std::cout << "BMP file created: " << filename << std::endl;
   };
 
   static void createAnimatedFrames(const char *folderName, Scene &scene, int width, int height, int numFrames)
   {
-    // Create the folder - simple approach
     int result = MKDIR(folderName);
 
-    // Check if folder creation was successful or if it already exists
     if (result != 0 && ACCESS(folderName, 0) != 0)
     {
       std::cerr << "Failed to create or access folder: " << folderName << std::endl;
@@ -284,16 +427,14 @@ public:
     {
       // Rotate triangles for animation
       for (auto &t : scene.triangles)
-        t.rotateC(0.05f); // Smaller rotation for smoother animation
+        t.rotateY(0.05f); // Rotate around Y axis for 3D effect
 
       auto data = scene.getData(width, height);
 
-      // Create filename for this frame inside the folder
       char filename[512];
       sprintf(filename, "%s/frame_%03d.bmp", folderName, frame);
 
       createBMP(filename, width, height, data);
-
       delete[] data;
 
       if ((frame + 1) % 10 == 0 || frame == 0)
@@ -302,8 +443,7 @@ public:
       }
     }
 
-    // Convert frames to GIF using ffmpeg with c++
-    
+    // Convert frames to GIF using ffmpeg
     auto cmd = "ffmpeg -y -loglevel quiet -framerate 25 -i " + std::string(folderName) + "/frame_%03d.bmp " + std::string(folderName) + "/animation.gif";
     system(cmd.c_str());
 
@@ -314,7 +454,6 @@ public:
       sprintf(filename, "%s/frame_%03d.bmp", folderName, frame);
       remove(filename);
     }
-    
   };
 
 private:
@@ -329,56 +468,53 @@ private:
   }
 };
 
-Triangle generateRandomTriangle(int width, int height)
+class Plane
 {
-  std::random_device rd;
-  std::mt19937 gen(rd());
-  std::uniform_real_distribution<float> disX(50.0f, static_cast<float>(width - 50));
-  std::uniform_real_distribution<float> disY(50.0f, static_cast<float>(height - 50));
+  Vec3 pos;
+  Vec3 color;
+  float width, height;
 
-  Vec3 a(disX(gen), disY(gen));
-  Vec3 b(disX(gen), disY(gen));
-  Vec3 c(disX(gen), disY(gen));
+public:
+  Plane(Vec3 position, Vec3 color, float w, float h) : pos(position), color(color), width(w), height(h) {}
 
-  // ranom color
-  Vec3 color(
-      static_cast<float>(rand() % 256),
-      static_cast<float>(rand() % 256),
-      static_cast<float>(rand() % 256)
-    );
+  std::vector<Triangle> toTriangles() const
+  {
+    std::vector<Triangle> triangles;
+    Vec3 a = pos + Vec3(-width / 2, -height / 2, 0);
+    Vec3 b = pos + Vec3(width / 2, -height / 2, 0);
+    Vec3 c = pos + Vec3(-width / 2, height / 2, 0);
+    Vec3 d = pos + Vec3(width / 2, height / 2, 0);
 
-  Triangle t(a, b, c, color);
-  std::uniform_real_distribution<float> angleDis(0.0f, 2.0f * 3.14159f);
-  t.rotateC(angleDis(gen));
-
-  return t;
-}
+    triangles.emplace_back(a, b, c, color);
+    triangles.emplace_back(b, d, c, color);
+    return triangles;
+  }
+};
 
 int main()
 {
-
   Scene scene;
-  int width = 800;
-  int height = 600;
+  int width = 1000;
+  int height = 1000;
 
-  Triangle center = Triangle(Vec3(width / 2 - 200, height / 2 - 200), Vec3(width / 2 + 200, height / 2 - 200), Vec3(width / 2, height / 2 + 100));
+  // Set up camera position
+  Camera camera = Camera(Vec3(0, 0, 100), Vec3(0, 0, 0), Vec3(0, 1, 0));
+  scene.setCamera(camera);
 
-  for (int i = 0; i < 10; ++i)
+  // Create cubes with different colors
+  Plane plane(Vec3(0, 0, 0), Vec3(0, 255, 0), 100, 10);
+
+  for (auto &t : plane.toTriangles())
   {
-    Triangle t = generateRandomTriangle(width, height);
     scene.addTriangle(t);
   }
-
-  center.rotateC(3.14159f); // Rotate 180 degrees in radians
-
-  scene.addTriangle(center);
 
   unsigned char *data = scene.getData(width, height);
   Image::createBMP("triangle.bmp", width, height, data);
   delete[] data;
 
-  Image::createAnimatedFrames("triangle_anim", scene, width, height, 250);
+  // Image::createAnimatedFrames("cube_animation", scene, width, height, 120);
 
-  std::cout << "Files created successfully!" << std::endl;
+  std::cout << "3D cubes rendered successfully!" << std::endl;
   return 0;
 }
