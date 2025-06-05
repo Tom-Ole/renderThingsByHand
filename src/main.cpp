@@ -471,25 +471,61 @@ private:
 class Plane
 {
   Vec3 pos;
+  Vec3 rotation;
   Vec3 color;
   float width, height;
 
 public:
-  Plane(Vec3 position, Vec3 color, float w, float h) : pos(position), color(color), width(w), height(h) {}
+  Plane(Vec3 position, Vec3 rotation, Vec3 color, float w, float h) : pos(position), rotation(rotation), color(color), width(w), height(h) {}
 
   std::vector<Triangle> toTriangles() const
-  {
+{
     std::vector<Triangle> triangles;
-    Vec3 a = pos + Vec3(-width / 2, -height / 2, 0);
-    Vec3 b = pos + Vec3(width / 2, -height / 2, 0);
-    Vec3 c = pos + Vec3(-width / 2, height / 2, 0);
-    Vec3 d = pos + Vec3(width / 2, height / 2, 0);
+
+    // Local corners before rotation
+    Vec3 a_local(-width / 2, -height / 2, 0);
+    Vec3 b_local(width / 2, -height / 2, 0);
+    Vec3 c_local(-width / 2, height / 2, 0);
+    Vec3 d_local(width / 2, height / 2, 0);
+
+    // Apply rotation to corners and move to world position
+    Vec3 a = pos + rotateVec3(a_local, rotation);
+    Vec3 b = pos + rotateVec3(b_local, rotation);
+    Vec3 c = pos + rotateVec3(c_local, rotation);
+    Vec3 d = pos + rotateVec3(d_local, rotation);
 
     triangles.emplace_back(a, b, c, color);
     triangles.emplace_back(b, d, c, color);
     return triangles;
-  }
+}
+
+Vec3 rotateVec3(const Vec3& v, const Vec3& angles) const {
+    // angles in radians
+    float cx = cos(angles.x), sx = sin(angles.x);
+    float cy = cos(angles.y), sy = sin(angles.y);
+    float cz = cos(angles.z), sz = sin(angles.z);
+
+    // Rotate around X (pitch)
+    Vec3 rx = Vec3(v.x, v.y * cx - v.z * sx, v.y * sx + v.z * cx);
+
+    // Rotate around Y (yaw)
+    Vec3 ry = Vec3(rx.x * cy + rx.z * sy, rx.y, -rx.x * sy + rx.z * cy);
+
+    // Rotate around Z (roll)
+    Vec3 rz = Vec3(ry.x * cz - ry.y * sz, ry.x * sz + ry.y * cz, ry.z);
+
+    return rz;
+}
+
+void rotate(Vec3 angle) {
+    rotation = rotation + angle;
+}
 };
+
+class Cube {
+  
+};
+
 
 int main()
 {
@@ -502,7 +538,9 @@ int main()
   scene.setCamera(camera);
 
   // Create cubes with different colors
-  Plane plane(Vec3(0, 0, 0), Vec3(0, 255, 0), 100, 10);
+  Plane plane(Vec3(0, 0, 0), Vec3(0,0,0), Vec3(0, 255, 0), 100, 10);
+
+  plane.rotate(Vec3(1, 1, 1)); // Rotate the plane for some dynamic effect
 
   for (auto &t : plane.toTriangles())
   {
@@ -515,6 +553,6 @@ int main()
 
   // Image::createAnimatedFrames("cube_animation", scene, width, height, 120);
 
-  std::cout << "3D cubes rendered successfully!" << std::endl;
+  std::cout << "Shapes rendered successfully!" << std::endl;
   return 0;
 }
