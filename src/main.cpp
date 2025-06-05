@@ -70,43 +70,44 @@ public:
 class Camera
 {
 public:
-    Vec3 position;
-    Vec3 target;
-    Vec3 up;
-    float fov;    // Field of view in radians
-    float near_z; // Near clipping plane
-    float far_z;  // Far clipping plane
+  Vec3 position;
+  Vec3 target;
+  Vec3 up;
+  float fov;    // Field of view in radians
+  float near_z; // Near clipping plane
+  float far_z;  // Far clipping plane
 
-    Camera(Vec3 pos, Vec3 tgt, Vec3 u, float field_of_view = 3.14159f / 3.0f)
-        : position(pos), target(tgt), up(u), fov(field_of_view), near_z(0.1f), far_z(1000.0f) {}
+  Camera(Vec3 pos, Vec3 tgt, Vec3 u, float field_of_view = 3.14159f / 3.0f)
+      : position(pos), target(tgt), up(u), fov(field_of_view), near_z(0.1f), far_z(1000.0f) {}
 
-    Vec3 project(const Vec3 &point, int screenWidth, int screenHeight) const
-    {
-        // Camera basis vectors
-        Vec3 forward = (target - position).normalize();
-        Vec3 right = forward.cross(up).normalize();
-        Vec3 camera_up = right.cross(forward);
+  Vec3 project(const Vec3 &point, int screenWidth, int screenHeight) const
+  {
+    // Camera basis vectors
+    Vec3 forward = (target - position).normalize();
+    Vec3 right = forward.cross(up).normalize();
+    Vec3 camera_up = right.cross(forward);
 
-        Vec3 translated = point - position;
-        float x = translated.dot(right);
-        float y = translated.dot(camera_up);
-        float z = translated.dot(forward);
+    Vec3 translated = point - position;
+    float x = translated.dot(right);
+    float y = translated.dot(camera_up);
+    float z = translated.dot(forward);
 
-        // Reject points behind camera
-        if (z <= near_z) z = near_z + 0.001f;
+    // Reject points behind camera
+    if (z <= near_z)
+      z = near_z + 0.001f;
 
-        float aspect = float(screenWidth) / screenHeight;
-        float scale = 1.0f / tanf(fov * 0.5f);
+    float aspect = float(screenWidth) / screenHeight;
+    float scale = 1.0f / tanf(fov * 0.5f);
 
-        float proj_x = (x * scale) / (z * aspect);
-        float proj_y = (y * scale) / z;
+    float proj_x = (x * scale) / (z * aspect);
+    float proj_y = (y * scale) / z;
 
-        // Convert to screen pixels (origin top-left)
-        float screen_x = (proj_x + 1.0f) * 0.5f * screenWidth;
-        float screen_y = (1.0f - proj_y) * 0.5f * screenHeight;
+    // Convert to screen pixels (origin top-left)
+    float screen_x = (proj_x + 1.0f) * 0.5f * screenWidth;
+    float screen_y = (1.0f - proj_y) * 0.5f * screenHeight;
 
-        return Vec3(screen_x, screen_y, z);
-    }
+    return Vec3(screen_x, screen_y, z);
+  }
 };
 
 class Triangle
@@ -479,7 +480,7 @@ public:
   Plane(Vec3 position, Vec3 rotation, Vec3 color, float w, float h) : pos(position), rotation(rotation), color(color), width(w), height(h) {}
 
   std::vector<Triangle> toTriangles() const
-{
+  {
     std::vector<Triangle> triangles;
 
     // Local corners before rotation
@@ -497,9 +498,10 @@ public:
     triangles.emplace_back(a, b, c, color);
     triangles.emplace_back(b, d, c, color);
     return triangles;
-}
+  }
 
-Vec3 rotateVec3(const Vec3& v, const Vec3& angles) const {
+  Vec3 rotateVec3(const Vec3 &v, const Vec3 &angles) const
+  {
     // angles in radians
     float cx = cos(angles.x), sx = sin(angles.x);
     float cy = cos(angles.y), sy = sin(angles.y);
@@ -515,17 +517,28 @@ Vec3 rotateVec3(const Vec3& v, const Vec3& angles) const {
     Vec3 rz = Vec3(ry.x * cz - ry.y * sz, ry.x * sz + ry.y * cz, ry.z);
 
     return rz;
-}
+  }
 
-void rotate(Vec3 angle) {
+  void rotate(Vec3 angle)
+  {
     rotation = rotation + angle;
-}
+  }
 };
 
-class Cube {
-  
-};
+class Cube
+{
+public:
+  Vec3 pos;
+  Vec3 rotation;
+  Vec3 color;
+  float size;
+  Cube(Vec3 position, Vec3 rotation, Vec3 color, float size)
+      : pos(position), rotation(rotation), color(color), size(size) {}
 
+  std::vector<Triangle> toTriangles() const
+  {
+  }
+};
 
 int main()
 {
@@ -538,7 +551,7 @@ int main()
   scene.setCamera(camera);
 
   // Create cubes with different colors
-  Plane plane(Vec3(0, 0, 0), Vec3(0,0,0), Vec3(0, 255, 0), 100, 10);
+  Plane plane(Vec3(0, 0, 0), Vec3(0, 0, 0), Vec3(0, 255, 0), 100, 10);
 
   plane.rotate(Vec3(1, 1, 1)); // Rotate the plane for some dynamic effect
 
